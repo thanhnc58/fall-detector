@@ -1,21 +1,31 @@
 import threading
 import cv2
 import numpy as np
-
 import fall_detector
-import simpleaudio as sa
-
+import pyaudio
+import wave
 import foreground_extractor
 
-
-# dataset_url = 'd:/Temp/pycharm/data/Lecture_room/'
-dataset_url = 'd:/Temp/pycharm/data/Coffee_room_01/Videos/'
-# dataset_url = 'd:/Temp/pycharm/data/Home_01/Videos/'
-# dataset_url = 'd:/Temp/pycharm/data/Office/'
+dataset_url = './'
 
 def beep(sound):
-    wave_obj = sa.WaveObject.from_wave_file('%s.wav' % sound)
-    wave_obj.play()
+    chunk = 1024
+
+    f = wave.open(r"%s.wav" % sound,"rb")
+    p = pyaudio.PyAudio()
+    stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
+                    channels = f.getnchannels(),
+                    rate = f.getframerate(),
+                    output = True)
+
+    data = f.readframes(chunk)
+    while data != '':
+        stream.write(data)
+        data = f.readframes(chunk)
+
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
 
 count = 1
 cap = cv2.VideoCapture(dataset_url + 'video (' + str(count) + ').avi')
@@ -106,7 +116,7 @@ while 1:
             topmost = tuple(maxCnt[maxCnt[:, :, 1].argmin()][0])
             bottommost = tuple(maxCnt[maxCnt[:, :, 1].argmax()][0])
 
-            fall = common.fall_detector.predict(FA, AR, HP, MC, reset)
+            fall = fall_detector.predict(FA, AR, HP, MC, reset)
             if fall == 1:
                 font = cv2.FONT_HERSHEY_SIMPLEX
                 cv2.putText(frame, 'OOPS!', (100, 100), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
