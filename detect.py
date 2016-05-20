@@ -5,7 +5,7 @@ import pyaudio
 import wave
 import foreground_extractor
 
-VIDEO_NAME = 'Test.mp4'
+VIDEO_NAME = 'videos/Fall07.mp4'
 SOUND_NAME = 'alarmz.wav'
 
 SHOW_ORIGIN = 1
@@ -14,19 +14,19 @@ SHOW_MHI = 0
 SHOW_COEFFICIENT = 1
 PLAY_SOUND = 1
 
-STEP_BY_STEP = 1                # Press c to move to next frame
+STEP_BY_STEP = 0                # Press c to move to next frame
 FRAME_SKIP = 0                  # Number of frames to skip when showing frames step by step
 
 MOTION_DURATION = 20            # Number of history images to store
 MOTION_HISTORY_STEP = 0.01      # Motion history image is brighter with smaller step
-MOVEMENT_COEFFICIENT = 1.2      # Maximum movement coefficient, above which system alerts
+MOVEMENT_COEFFICIENT = 1.8      # Maximum movement coefficient, above which system alerts
 
 
-ANGLE_DURATION = 5
-ANGLE_STANDARD_DEVIATION = 15   # Maximum ellipse angle standard deviation, above which system alerts
+ANGLE_DURATION = 8              # Number of frames used to calculate angle standard deviation
+ANGLE_STANDARD_DEVIATION = 16   # Maximum ellipse angle standard deviation, above which system alerts
 
-RATIO_DURATION = 5
-RATIO_STANDARD_DEVIATION = 0.9  # Maximum standard deviation of ratio of major and minor axes of ellipse, above which system alerts
+RATIO_DURATION = 5              # Number of frames used to calculate ratio standard deviation
+RATIO_STANDARD_DEVIATION = 0.3  # Maximum standard deviation of ratio of major and minor axes of ellipse, above which system alerts
 
 count = 0
 mhi = None
@@ -107,7 +107,8 @@ def calculateAngleStandardDeviation(ellipse):
 
 def calculateRatioStandardDeviation(ellipse):
     (x, y), (a, b), angle = ellipse
-    ratio = a / b
+    if abs(90 - angle) > 45: ratio = a / b
+    else: ratio = b / a
     ratioList.append(ratio)
     npRatioList = np.array(ratioList[-1-RATIO_DURATION:-1])
     return np.std(npRatioList)
