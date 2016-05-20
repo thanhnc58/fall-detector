@@ -14,12 +14,17 @@ SHOW_MHI = 1
 SHOW_COEFFICIENT = 1
 PLAY_SOUND = 1
 
+DURATION = 20                   # Number of history images to store
+MOTION_HISTORY_STEP = 0.05      # Motion history image is brighter with smaller step
 
-DURATION = 20   # Number of history images to store
+MOVEMENT_COEFFICIENT = 1.2      # Maximum movement coefficient, above which system alerts
+ANGLE_STANDARD_DEVIATION = 15   # Maximum ellipse angle standard deviation, above which system alerts
+RATIO_STANDARD_DEVIATION = 0.9  # Maximum standard deviation of ratio of major and minor axes of ellipse, above which system alerts
 
-mhi = None
 count = 0
-cap = cv2.VideoCapture(VIDEO_NAME)
+mhi = None
+angleList = []
+ratioList = []
 
 def beep():
     chunk = 1024
@@ -39,7 +44,7 @@ def beep():
     stream.close()
     p.terminate()
 
-def alert():
+def alert(frame):
     font = cv2.FONT_HERSHEY_SIMPLEX
     cv2.putText(frame, 'OOPS!', (100, 100), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
@@ -53,24 +58,6 @@ def findForeground(frame):
     ret, foregroundBinary = cv2.threshold(foreground, 230, 255, cv2.THRESH_BINARY)
     if SHOW_FOREGROUND: cv2.imshow('foreground', foregroundBinary)
     return foregroundBinary
-
-def calculateMovementCoefficient(foreground, timestamp):
-    global mhi
-    step = 0.05     # Image is brighter with smaller step
-    w, h = np.shape(foreground)
-    if timestamp == 0:
-        mhi = np.zeros((w, h), np.float32)
-        return 0
-
-    foreground[ foreground > 0 ] = 1
-    fgsum = foreground.sum()
-    if fgsum == 0: return 0
-
-    mhi = mhi - step
-    mhi[ foreground != 0 ] = 1
-    mhi[ (mhi < 1 - DURATION * step) & (foreground == 0) ] = 0
-    if SHOW_MHI: cv2.imshow('Motion history', mhi)
-    return mhi.sum() / fgsum
 
 def findMaxContour(foreground):
     image, contours, hierarchy = cv2.findContours(foreground, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -87,26 +74,68 @@ def findMaxContour(foreground):
     if perimeter < 200: return None
     return maxCnt
 
-while True:
-    # Press q to quit
-    if cv2.waitKey(1) & 0xFF == ord('q'): break
-    hasNext, frame = cap.read()
-    if not hasNext: continue
+def calculateMovementCoefficient(foreground, timestamp):
+    global mhi
+    w, h = np.shape(foreground)
+    if timestamp == 0:
+        mhi = np.zeros((w, h), np.float32)
+        return 0
 
-    foreground = findForeground(frame)
-    MC = calculateMovementCoefficient(foreground, count)
+    foreground[ foreground > 0 ] = 1
+    fgsum = foreground.sum()
+    if fgsum == 0: return 0
 
-    maxCnt = findMaxContour(foreground)
-    if maxCnt is not None:
-        (x, y), (a, b), angle = ellipse = cv2.fitEllipse(maxCnt)
+    mhi = mhi - MOTION_HISTORY_STEP
+    mhi[ foreground != 0 ] = 1
+    mhi[ (mhi < 1 - DURATION * MOTION_HISTORY_STEP) & (foreground == 0) ] = 0
+    if SHOW_MHI: cv2.imshow('Motion history', mhi)
+    return mhi.sum() / fgsum
 
-        cv2.ellipse(frame, ellipse, (0, 255, 0), 2)
+def calculateAngleStandardDeviation(ellipse):
+    (x, y), (a, b), angle = ellipse
+    angleList.append(angle)
+    npAngleList = np.array(angleList[-1-DURATION:-1])
+    return np.std(npAngleList)
 
-    if SHOW_ORIGIN: cv2.imshow('frame', frame)
-    if SHOW_COEFFICIENT: print "Frame %d:, MC: %.2f" % (count, MC)
-    count += 1
+def calculateRatioStandardDeviation(ellipse):
+    (x, y), (a, b), angle = ellipse
+    ratio = a / b
+    ratioList.append(ratio)
+    npRatioList = np.array(ratioList[-1-DURATION:-1])
+    return np.std(npRatioList)
 
-cap.release()
-cv2.destroyAllWindows()
+def fallDetected(MC, AD, RD):
+    if SHOW_COEFFICIENT:
+        print "Frame %d:, MC: %.2f, AD: %.2f, RD: %.2f" % (count, MC, AD, RD)
+    return  MC > MOVEMENT_COEFFICIENT and \
+            AD > ANGLE_STANDARD_DEVIATION and \
+            RD > RATIO_STANDARD_DEVIATION
 
+def analysis():
+    global count
+    cap = cv2.VideoCapture(VIDEO_NAME)
 
+    while True:
+        # Press q to quit
+        if cv2.waitKey(1) & 0xFF == ord('q'): break
+        hasNext, frame = cap.read()
+        if not hasNext: continue
+
+        foreground = findForeground(frame)
+        MC = calculateMovementCoefficient(foreground, count)
+        maxCnt = findMaxContour(foreground)
+
+        if maxCnt is not None:
+            (x, y), (a, b), angle = ellipse = cv2.fitEllipse(maxCnt)
+            cv2.ellipse(frame, ellipse, (0, 255, 0), 2)
+            AD = calculateAngleStandardDeviation(ellipse)
+            RD = calculateRatioStandardDeviation(ellipse)
+            if fallDetected(MC, AD, RD): alert(frame)
+
+        if SHOW_ORIGIN: cv2.imshow('frame', frame)
+        count += 1
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+analysis()
