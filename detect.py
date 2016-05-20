@@ -9,16 +9,23 @@ VIDEO_NAME = 'Test.mp4'
 SOUND_NAME = 'alarmz.wav'
 
 SHOW_ORIGIN = 1
-SHOW_FOREGROUND = 1
-SHOW_MHI = 1
+SHOW_FOREGROUND = 0
+SHOW_MHI = 0
 SHOW_COEFFICIENT = 1
 PLAY_SOUND = 1
 
-DURATION = 20                   # Number of history images to store
-MOTION_HISTORY_STEP = 0.05      # Motion history image is brighter with smaller step
+STEP_BY_STEP = 1                # Press c to move to next frame
+FRAME_SKIP = 0                  # Number of frames to skip when showing frames step by step
 
+MOTION_DURATION = 20            # Number of history images to store
+MOTION_HISTORY_STEP = 0.01      # Motion history image is brighter with smaller step
 MOVEMENT_COEFFICIENT = 1.2      # Maximum movement coefficient, above which system alerts
+
+
+ANGLE_DURATION = 5
 ANGLE_STANDARD_DEVIATION = 15   # Maximum ellipse angle standard deviation, above which system alerts
+
+RATIO_DURATION = 5
 RATIO_STANDARD_DEVIATION = 0.9  # Maximum standard deviation of ratio of major and minor axes of ellipse, above which system alerts
 
 count = 0
@@ -87,21 +94,22 @@ def calculateMovementCoefficient(foreground, timestamp):
 
     mhi = mhi - MOTION_HISTORY_STEP
     mhi[ foreground != 0 ] = 1
-    mhi[ (mhi < 1 - DURATION * MOTION_HISTORY_STEP) & (foreground == 0) ] = 0
+    mhi[ (mhi < 1 - MOTION_DURATION * MOTION_HISTORY_STEP) & (foreground == 0) ] = 0
     if SHOW_MHI: cv2.imshow('Motion history', mhi)
     return mhi.sum() / fgsum
 
 def calculateAngleStandardDeviation(ellipse):
     (x, y), (a, b), angle = ellipse
+    if angle > 90: angle = 180 - angle
     angleList.append(angle)
-    npAngleList = np.array(angleList[-1-DURATION:-1])
+    npAngleList = np.array(angleList[-1-ANGLE_DURATION:-1])
     return np.std(npAngleList)
 
 def calculateRatioStandardDeviation(ellipse):
     (x, y), (a, b), angle = ellipse
     ratio = a / b
     ratioList.append(ratio)
-    npRatioList = np.array(ratioList[-1-DURATION:-1])
+    npRatioList = np.array(ratioList[-1-RATIO_DURATION:-1])
     return np.std(npRatioList)
 
 def fallDetected(MC, AD, RD):
@@ -117,7 +125,10 @@ def analysis():
 
     while True:
         # Press q to quit
-        if cv2.waitKey(1) & 0xFF == ord('q'): break
+        k = cv2.waitKey(1) & 0xFF
+        if k == ord('q'): break
+        if STEP_BY_STEP and count > FRAME_SKIP and k != ord('c'): continue
+
         hasNext, frame = cap.read()
         if not hasNext: continue
 
