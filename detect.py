@@ -1,9 +1,11 @@
+#! /usr/bin/python
+
 import threading
 import cv2
 import numpy as np
 import pyaudio
 import wave
-import foreground_extractor
+import sys
 
 VIDEO_NAME = 'videos/Fall07.mp4'
 SOUND_NAME = 'alarmz.wav'
@@ -11,7 +13,7 @@ SOUND_NAME = 'alarmz.wav'
 SHOW_ORIGIN = 1
 SHOW_FOREGROUND = 0
 SHOW_MHI = 0
-SHOW_COEFFICIENT = 1
+SHOW_COEFFICIENT = 0
 PLAY_SOUND = 1
 
 STEP_BY_STEP = 0                # Press c to move to next frame
@@ -19,19 +21,22 @@ FRAME_SKIP = 0                  # Number of frames to skip when showing frames s
 
 MOTION_DURATION = 20            # Number of history images to store
 MOTION_HISTORY_STEP = 0.01      # Motion history image is brighter with smaller step
-MOVEMENT_COEFFICIENT = 1.8      # Maximum movement coefficient, above which system alerts
+MOVEMENT_COEFFICIENT = 1.7      # Maximum movement coefficient, above which system alerts
 
 
 ANGLE_DURATION = 8              # Number of frames used to calculate angle standard deviation
-ANGLE_STANDARD_DEVIATION = 16   # Maximum ellipse angle standard deviation, above which system alerts
+ANGLE_STANDARD_DEVIATION = 10   # Maximum ellipse angle standard deviation, above which system alerts
 
 RATIO_DURATION = 5              # Number of frames used to calculate ratio standard deviation
-RATIO_STANDARD_DEVIATION = 0.3  # Maximum standard deviation of ratio of major and minor axes of ellipse, above which system alerts
+RATIO_STANDARD_DEVIATION = 0.2  # Maximum standard deviation of ratio of major and minor axes of ellipse, above which system alerts
 
 count = 0
 mhi = None
 angleList = []
 ratioList = []
+fall = False
+fgbg_mog2 = cv2.createBackgroundSubtractorMOG2(500, 60, True)
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (14, 14))
 
 def beep():
     chunk = 1024
@@ -53,7 +58,7 @@ def beep():
 
 def alert(frame):
     font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(frame, 'OOPS!', (100, 100), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+    cv2.putText(frame, 'OOPS!!!!', (100, 100), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
     if PLAY_SOUND and threading.activeCount() == 1:
         t = threading.Thread(target=beep)
@@ -61,7 +66,8 @@ def alert(frame):
 
 def findForeground(frame):
     blured = cv2.medianBlur(frame, 7)
-    foreground = foreground_extractor.mog2(blured)
+    fgmask = fgbg_mog2.apply(blured)
+    foreground = cv2.morphologyEx(fgmask, cv2.MORPH_DILATE, kernel)
     ret, foregroundBinary = cv2.threshold(foreground, 230, 255, cv2.THRESH_BINARY)
     if SHOW_FOREGROUND: cv2.imshow('foreground', foregroundBinary)
     return foregroundBinary
@@ -120,9 +126,10 @@ def fallDetected(MC, AD, RD):
             AD > ANGLE_STANDARD_DEVIATION and \
             RD > RATIO_STANDARD_DEVIATION
 
-def analysis():
+def analysis(video=VIDEO_NAME):
     global count
-    cap = cv2.VideoCapture(VIDEO_NAME)
+    global fall
+    cap = cv2.VideoCapture(video)
 
     while True:
         # Press q to quit
@@ -142,7 +149,8 @@ def analysis():
             cv2.ellipse(frame, ellipse, (0, 255, 0), 2)
             AD = calculateAngleStandardDeviation(ellipse)
             RD = calculateRatioStandardDeviation(ellipse)
-            if fallDetected(MC, AD, RD): alert(frame)
+            if not fall: fall = fallDetected(MC, AD, RD)
+            if fall: alert(frame)
 
         if SHOW_ORIGIN: cv2.imshow('frame', frame)
         count += 1
@@ -150,4 +158,11 @@ def analysis():
     cap.release()
     cv2.destroyAllWindows()
 
-analysis()
+if __name__ == "__main__":
+    argc = len(sys.argv)
+    if argc == 1:
+        analysis()
+    elif argc == 2:
+        analysis(sys.argv[1])
+    else:
+        print "Usage: python detect.py [video_path]"
