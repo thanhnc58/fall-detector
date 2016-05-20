@@ -6,12 +6,20 @@ import pyaudio
 import wave
 import foreground_extractor
 
-dataset_url = './'
+VIDEO_NAME = 'Test.mp4'
+SOUND_NAME = 'alarmz.wav'
 
-def beep(sound):
+SHOW_ORIGIN = 0
+SHOW_FOREGROUND = 1
+SHOW_MHI = 1
+
+mhi = None
+count = 0
+cap = cv2.VideoCapture(VIDEO_NAME)
+
+def beep():
     chunk = 1024
-
-    f = wave.open(r"%s.wav" % sound,"rb")
+    f = wave.open(r"%s" % SOUND_NAME,"rb")
     p = pyaudio.PyAudio()
     stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
                     channels = f.getnchannels(),
@@ -27,40 +35,55 @@ def beep(sound):
     stream.close()
     p.terminate()
 
-count = 1
-cap = cv2.VideoCapture(dataset_url + 'video (' + str(count) + ').avi')
+def postProcess(frame):
+    blured = cv2.medianBlur(frame, 7)
+    foreground = foreground_extractor.mog2(blured)
+    ret, foregroundBinary = cv2.threshold(foreground, 230, 255, cv2.THRESH_BINARY)
+    if SHOW_FOREGROUND: cv2.imshow('foreground', foregroundBinary)
+    return foregroundBinary
 
-kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (6, 6))
-reset = False
-positive = False
+def calculateMovementCoefficient(foreground, timestamp):
+    global mhi
+    duration = 20   #Number of history images to store
+    step = 0.05     #Image is brighter with smaller step
+    w, h = np.shape(foreground)
+    if timestamp == 0:
+        mhi = np.zeros((w, h), np.float32)
+        return 0
 
-while 1:
-    ret, frame = cap.read()
-    if frame is None:
-        count += 1
-        cap = cv2.VideoCapture(dataset_url + 'video (' + str(count) + ').avi')
-        reset = True
-        foreground_extractor.reset()
-        cv2.waitKey(300)
-        continue
-    post_processing = frame
-    post_processing = cv2.medianBlur(post_processing, 7)
-    foreGround = foreground_extractor.mog2(post_processing)
-    ret, foreground_binary = cv2.threshold(foreGround, 230, 255, cv2.THRESH_BINARY)
-    cv2.imshow('post_processing', post_processing)
-    cv2.imshow('foreground', foreground_binary)
+    foreground[ foreground > 0 ] = 1
+    fgsum = foreground.sum()
+    if fgsum == 0: return 0
 
-    ###############################################################
+    mhi = mhi - step
+    mhi[ foreground != 0 ] = 1
+    mhi[ (mhi < 1 - duration * step) & (foreground == 0) ] = 0
+    if SHOW_MHI: cv2.imshow('Motion history', mhi)
+    return mhi.sum() / fgsum
 
-    image, contours, hierarchy = cv2.findContours(foreground_binary, 1, 2)
+def findMaxContour(frame):
+    image, contours, hierarchy = cv2.findContours(processedFrame, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) == 0: return None
 
-    if (len(contours) > 0):
-        maxCnt = contours[0]
-        for cnt in contours:
-            a = cv2.contourArea(cnt)
-            if a > cv2.contourArea(maxCnt):
-                maxCnt = cnt
+    maxCnt = contours[0]
+    maxArea = cv2.contourArea(maxCnt)
+    for cnt in contours:
+        a = cv2.contourArea(cnt)
+        if a > maxArea:
+            maxCnt = cnt
+            maxArea = a
+    return maxCnt
 
+while True:
+    if cv2.waitKey(1) & 0xFF == ord('q'): break
+    hasNext, frame = cap.read()
+    if not hasNext: continue
+
+    processedFrame = postProcess(frame)
+    MC = calculateMovementCoefficient(processedFrame, count)
+    print MC
+    maxCnt = findMaxContour(processedFrame)
+    if maxCnt is not None:
         perimeter = cv2.arcLength(maxCnt, True)
         if perimeter > 200:
             # ellipse = ((0, 0), (0, 0), 0)
@@ -113,33 +136,24 @@ while 1:
             # http://opencvpython.blogspot.com/2012/06/hi-this-article-is-tutorial-which-try.html
             # http://opencvpython.blogspot.com/2012/06/contours-2-brotherhood.html
             # http://opencvpython.blogspot.com/2012/06/contours-3-extraction.html
-            topmost = tuple(maxCnt[maxCnt[:, :, 1].argmin()][0])
-            bottommost = tuple(maxCnt[maxCnt[:, :, 1].argmax()][0])
+            # topmost = tuple(maxCnt[maxCnt[:, :, 1].argmin()][0])
+            # bottommost = tuple(maxCnt[maxCnt[:, :, 1].argmax()][0])
 
-            fall = fall_detector.predict(FA, AR, HP, MC, reset)
+            fall = fall_detector.predict(FA, AR, HP, MC, False)
             if fall == 1:
                 font = cv2.FONT_HERSHEY_SIMPLEX
                 cv2.putText(frame, 'OOPS!', (100, 100), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
-                t = threading.Thread(target=beep, args=('alarmz',))
-                t.start()
+                if threading.activeCount() == 1:
+                    t = threading.Thread(target=beep)
+                    t.start()
 
-            reset = False
-
-    cv2.imshow('frame', frame)
+    if SHOW_ORIGIN: cv2.imshow('frame', frame)
+    count += 1
 
     ###############################################################
 
-    positive = False
-
-    k = cv2.waitKey(12) & 0xff
-    if k != 255:
-        print(k)
-    if k == 112:
-        positive = True
-        k = cv2.waitKey() & 0xff
-    elif k == 27:
-        break
-
 cap.release()
 cv2.destroyAllWindows()
+
+
