@@ -1,4 +1,5 @@
 #! /usr/bin/python
+import time
 
 import threading
 import cv2
@@ -14,7 +15,8 @@ SHOW_ORIGIN = 1
 SHOW_FOREGROUND = 0
 SHOW_MHI = 0
 SHOW_COEFFICIENT = 0
-PLAY_SOUND = 1
+SHOW_TIME = 1
+PLAY_SOUND = 0
 
 STEP_BY_STEP = 0                # Press c to move to next frame
 FRAME_SKIP = 0                  # Number of frames to skip when showing frames step by step
@@ -132,6 +134,7 @@ def analysis(video=VIDEO_NAME):
     cap = cv2.VideoCapture(video)
 
     while True:
+        if SHOW_TIME: start = time.time()
         # Press q to quit
         k = cv2.waitKey(1) & 0xFF
         if k == ord('q'): break
@@ -139,10 +142,16 @@ def analysis(video=VIDEO_NAME):
 
         hasNext, frame = cap.read()
         if not hasNext: continue
+        if SHOW_TIME: rd_time = time.time()
 
         foreground = findForeground(frame)
+        if SHOW_TIME: fg_time = time.time()
+
         MC = calculateMovementCoefficient(foreground, count)
+        if SHOW_TIME: mc_time = time.time()
+
         maxCnt = findMaxContour(foreground)
+        if SHOW_TIME: ct_time = time.time()
 
         if maxCnt is not None:
             (x, y), (a, b), angle = ellipse = cv2.fitEllipse(maxCnt)
@@ -153,6 +162,8 @@ def analysis(video=VIDEO_NAME):
             if fall: alert(frame)
 
         if SHOW_ORIGIN: cv2.imshow('frame', frame)
+        if SHOW_TIME: stop = time.time()
+        if SHOW_TIME: print "read: %.5f, foreground: %.5f, mc: %.5f, contour: %.5f, rest: %.5f" % (rd_time-start, fg_time-rd_time, mc_time-fg_time, ct_time-mc_time, stop-ct_time)
         count += 1
 
     cap.release()
